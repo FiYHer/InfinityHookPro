@@ -7,4 +7,5 @@ InfinityHookPro Win7 -> Win10 latest
 
 <h1 align="center">
 	<img src="Win7.jpg" alt="Win7">
+	<img src="Win10 21h1.jpg" alt="Win10 21h1">
 </h1>
