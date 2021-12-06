@@ -5,6 +5,8 @@ InfinityHookPro Win7 -> Win10 latest
 
 参考了网上大佬发出来的各种版本,最终出了这份代码,理论上支持Win7到最新版本的Win10了
 
+Win11待取证
+
 代码里面有很详细的注释,不懂的地方可以结合博客
 
 	参考博客
@@ -22,5 +24,6 @@ InfinityHookPro Win7 -> Win10 latest
 
 <h1 align="center">
 	<img src="Win7.jpg" alt="Win7">
+	<img src="Win8.jpg" alt="Win8">
 	<img src="Win10 21h1.jpg" alt="Win10 21h1">
 </h1>
