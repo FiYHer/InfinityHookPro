@@ -3,7 +3,7 @@
 
 #pragma warning(disable : 4201)
 
-/* Î¢Èí¹Ù·½ÎÄµµ¶¨Òå
+/* å¾®è½¯å®˜æ–¹æ–‡æ¡£å®šä¹‰
 *   https://docs.microsoft.com/en-us/windows/win32/etw/wnode-header*/
 typedef struct _WNODE_HEADER
 {
@@ -25,7 +25,7 @@ typedef struct _WNODE_HEADER
 	ULONG Flags;
 } WNODE_HEADER, * PWNODE_HEADER;
 
-/* Î¢ÈíÎÄµµ¶¨Òå
+/* å¾®è½¯æ–‡æ¡£å®šä¹‰
 *   https://docs.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties*/
 typedef struct _EVENT_TRACE_PROPERTIES
 {
@@ -52,14 +52,14 @@ typedef struct _EVENT_TRACE_PROPERTIES
 	ULONG LoggerNameOffset;
 } EVENT_TRACE_PROPERTIES, * PEVENT_TRACE_PROPERTIES;
 
-/* Õâ½á¹¹ÊÇ´óÀĞÄæÏò³öÀ´µÄ */
+/* è¿™ç»“æ„æ˜¯å¤§ä½¬é€†å‘å‡ºæ¥çš„ */
 typedef struct _CKCL_TRACE_PROPERIES : EVENT_TRACE_PROPERTIES
 {
 	ULONG64 Unknown[3];
 	UNICODE_STRING ProviderName;
 } CKCL_TRACE_PROPERTIES, * PCKCL_TRACE_PROPERTIES;
 
-// ²Ù×÷ÀàĞÍ
+// æ“ä½œç±»å‹
 typedef enum _trace_type
 {
 	start_trace = 1,
@@ -71,7 +71,7 @@ typedef enum _trace_type
 
 namespace k_hook
 {
-	// Õâ¸öÖµÊÇ¹Ì¶¨²»±äµÄ
+	// è¿™ä¸ªå€¼æ˜¯å›ºå®šä¸å˜çš„
 	GUID g_ckcl_session_guid = { 0x54dea73a, 0xed1f, 0x42a4, { 0xaf, 0x71, 0x3e, 0x63, 0xd0, 0x56, 0xf1, 0x74 } };
 
 	fptr_call_back g_fptr = nullptr;
@@ -90,12 +90,12 @@ namespace k_hook
 	typedef __int64 (*fptr_HvlGetQpcBias)();
 	fptr_HvlGetQpcBias g_original_HvlGetQpcBias = nullptr;
 
-	// ĞŞ¸Ä¸ú×ÙÉèÖÃ
+	// ä¿®æ”¹è·Ÿè¸ªè®¾ç½®
 	NTSTATUS modify_trace_settings(trace_type type)
 	{
 		const unsigned long tag = 'VMON';
 
-		// ÉêÇë½á¹¹Ìå¿Õ¼ä
+		// ç”³è¯·ç»“æ„ä½“ç©ºé—´
 		CKCL_TRACE_PROPERTIES* property = (CKCL_TRACE_PROPERTIES*)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, tag);
 		if (!property)
 		{
@@ -103,7 +103,7 @@ namespace k_hook
 			return STATUS_MEMORY_NOT_ALLOCATED;
 		}
 
-		// ÉêÇë±£´æÃû³ÆµÄ¿Õ¼ä
+		// ç”³è¯·ä¿å­˜åç§°çš„ç©ºé—´
 		wchar_t* provider_name = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, 256 * sizeof(wchar_t), tag);
 		if (!provider_name)
 		{
@@ -112,15 +112,15 @@ namespace k_hook
 			return STATUS_MEMORY_NOT_ALLOCATED;
 		}
 
-		// Çå¿ÕÄÚ´æ
+		// æ¸…ç©ºå†…å­˜
 		RtlZeroMemory(property, PAGE_SIZE);
 		RtlZeroMemory(provider_name, 256 * sizeof(wchar_t));
 
-		// Ãû³Æ¸³Öµ
+		// åç§°èµ‹å€¼
 		RtlCopyMemory(provider_name, L"Circular Kernel Context Logger", sizeof(L"Circular Kernel Context Logger"));
 		RtlInitUnicodeString(&property->ProviderName, (const wchar_t*)provider_name);
 
-		// ½á¹¹ÌåÌî³ä
+		// ç»“æ„ä½“å¡«å……
 		property->Wnode.BufferSize = PAGE_SIZE;
 		property->Wnode.Flags = 0x00020000;
 		property->Wnode.Guid = g_ckcl_session_guid;
@@ -130,111 +130,111 @@ namespace k_hook
 		property->MaximumBuffers = 2;
 		property->LogFileMode = 0x00000400;
 
-		// Ö´ĞĞ²Ù×÷
+		// æ‰§è¡Œæ“ä½œ
 		unsigned long length = 0;
 		if (type == trace_type::syscall_trace) property->EnableFlags = 0x00000080;
 		NTSTATUS status = NtTraceControl(type, property, PAGE_SIZE, property, PAGE_SIZE, &length);
 
-		// ÊÍ·ÅÄÚ´æ¿Õ¼ä
+		// é‡Šæ”¾å†…å­˜ç©ºé—´
 		ExFreePoolWithTag(provider_name, tag);
 		ExFreePoolWithTag(property, tag);
 
 		return status;
 	}
 
-	// ÎÒÃÇµÄÌæ»»º¯Êı,Õë¶ÔµÄÊÇ´ÓWin7µ½Win10 1909µÄÏµÍ³
+	// æˆ‘ä»¬çš„æ›¿æ¢å‡½æ•°,é’ˆå¯¹çš„æ˜¯ä»Win7åˆ°Win10 1909çš„ç³»ç»Ÿ
 	unsigned long long self_get_cpu_clock()
 	{
-		// ·Å¹ıÄÚºËÄ£Ê½µÄµ÷ÓÃ
+		// æ”¾è¿‡å†…æ ¸æ¨¡å¼çš„è°ƒç”¨
 		if (ExGetPreviousMode() == KernelMode) return __rdtsc();
 
-		// ÄÃµ½µ±Ç°Ïß³Ì
+		// æ‹¿åˆ°å½“å‰çº¿ç¨‹
 		PKTHREAD current_thread = (PKTHREAD)__readgsqword(0x188);
 
-		// ²»Í¬°æ±¾²»Í¬Æ«ÒÆ
+		// ä¸åŒç‰ˆæœ¬ä¸åŒåç§»
 		unsigned int call_index = 0;
-		if (g_build_number <= 9600) call_index = *(unsigned int*)((unsigned long long)current_thread + 0x1f8);
+		if (g_build_number <= 7601) call_index = *(unsigned int*)((unsigned long long)current_thread + 0x1f8);
 		else call_index = *(unsigned int*)((unsigned long long)current_thread + 0x80);
 
-		// ÄÃµ½µ±Ç°Õ»µ×ºÍÕ»¶¥
+		// æ‹¿åˆ°å½“å‰æ ˆåº•å’Œæ ˆé¡¶
 		void** stack_max = (void**)__readgsqword(0x1a8);
 		void** stack_frame = (void**)_AddressOfReturnAddress();
 
-		// ¿ªÊ¼²éÕÒµ±Ç°Õ»ÖĞµÄssdtµ÷ÓÃ
+		// å¼€å§‹æŸ¥æ‰¾å½“å‰æ ˆä¸­çš„ssdtè°ƒç”¨
 		for (void** stack_current = stack_max; stack_current > stack_frame; --stack_current)
 		{
-			/* Õ»ÖĞssdtµ÷ÓÃÌØÕ÷,·Ö±ğÊÇ
+			/* æ ˆä¸­ssdtè°ƒç”¨ç‰¹å¾,åˆ†åˆ«æ˜¯
 			*   mov [rsp+48h+var_20], 501802h
 			*   mov r9d, 0F33h
 			*/
 #define INFINITYHOOK_MAGIC_1 ((unsigned long)0x501802)
 #define INFINITYHOOK_MAGIC_2 ((unsigned short)0xF33)
 
-			// µÚÒ»¸öÌØÕ÷Öµ¼ì²é
+			// ç¬¬ä¸€ä¸ªç‰¹å¾å€¼æ£€æŸ¥
 			unsigned long* l_value = (unsigned long*)stack_current;
 			if (*l_value != INFINITYHOOK_MAGIC_1) continue;
 
-			// ÕâÀïÎªÊ²Ã´¼õ?ÅäºÏÑ°ÕÒµÚ¶ş¸öÌØÕ÷Öµ°¡
+			// è¿™é‡Œä¸ºä»€ä¹ˆå‡?é…åˆå¯»æ‰¾ç¬¬äºŒä¸ªç‰¹å¾å€¼å•Š
 			--stack_current;
 
-			// µÚ¶ş¸öÌØÕ÷Öµ¼ì²é
+			// ç¬¬äºŒä¸ªç‰¹å¾å€¼æ£€æŸ¥
 			unsigned short* s_value = (unsigned short*)stack_current;
 			if (*s_value != INFINITYHOOK_MAGIC_2) continue;
 
-			// ÌØÕ÷ÖµÆ¥Åä³É¹¦,ÔÙµ¹¹ıÀ´²éÕÒ
+			// ç‰¹å¾å€¼åŒ¹é…æˆåŠŸ,å†å€’è¿‡æ¥æŸ¥æ‰¾
 			for (; stack_current < stack_max; ++stack_current)
 			{
-				// ¼ì²éÊÇ·ñÔÚssdt±íÄÚ
+				// æ£€æŸ¥æ˜¯å¦åœ¨ssdtè¡¨å†…
 				unsigned long long* ull_value = (unsigned long long*)stack_current;
 				if (!(PAGE_ALIGN(*ull_value) >= g_syscall_table && PAGE_ALIGN(*ull_value) < (void*)((unsigned long long)g_syscall_table + (PAGE_SIZE * 2)))) continue;
 
-				// ÏÖÔÚÒÑ¾­È·¶¨ÊÇssdtº¯Êıµ÷ÓÃÁË
-				// ÕâÀïÊÇÕÒµ½KiSystemServiceExit
+				// ç°åœ¨å·²ç»ç¡®å®šæ˜¯ssdtå‡½æ•°è°ƒç”¨äº†
+				// è¿™é‡Œæ˜¯æ‰¾åˆ°KiSystemServiceExit
 				void** system_call_function = &stack_current[9];
 
-				// µ÷ÓÃ»Øµ÷º¯Êı
+				// è°ƒç”¨å›è°ƒå‡½æ•°
 				if (g_fptr) g_fptr(call_index, system_call_function);
 
-				// Ìø³öÑ­»·
+				// è·³å‡ºå¾ªç¯
 				break;
 			}
 
-			// Ìø³öÑ­»·
+			// è·³å‡ºå¾ªç¯
 			break;
 		}
 
-		// µ÷ÓÃÔ­º¯Êı
+		// è°ƒç”¨åŸå‡½æ•°
 		return __rdtsc();
 	}
 
-	// ÎÒÃÇµÄÌæ»»º¯Êı,Õë¶ÔµÄÊÇWin 1919ÍùÉÏµÄÏµÍ³
+	// æˆ‘ä»¬çš„æ›¿æ¢å‡½æ•°,é’ˆå¯¹çš„æ˜¯Win 1919å¾€ä¸Šçš„ç³»ç»Ÿ
 	EXTERN_C __int64 self_hvl_get_qpc_bias()
 	{
-		// ÎÒÃÇµÄ¹ıÂËº¯Êı
+		// æˆ‘ä»¬çš„è¿‡æ»¤å‡½æ•°
 		self_get_cpu_clock();
 
-		// ÕâÀïÊÇÕæÕıHvlGetQpcBias×öµÄÊÂÇé
+		// è¿™é‡Œæ˜¯çœŸæ­£HvlGetQpcBiasåšçš„äº‹æƒ…
 		return *((unsigned long long*)(*((unsigned long long*)g_HvlpReferenceTscPage)) + 3);
 	}
 
 	bool initialize(fptr_call_back fptr)
 	{
-		// »Øµ÷º¯ÊıÖ¸Õë¼ì²é
+		// å›è°ƒå‡½æ•°æŒ‡é’ˆæ£€æŸ¥
 		if (!fptr) return false;
 		DbgPrintEx(0, 0, "[%s] call back ptr is 0x%p \n", __FUNCTION__, fptr);
 		g_fptr = fptr;
 
-		// »ñÈ¡ÏµÍ³°æ±¾ºÅ
+		// è·å–ç³»ç»Ÿç‰ˆæœ¬å·
 		g_build_number = k_utils::get_system_build_number();
 		if (!g_build_number) return false;
 		DbgPrintEx(0, 0, "[%s] build number is %ld \n", __FUNCTION__, g_build_number);
 
-		// »ñÈ¡ÏµÍ³»ùÖ·
+		// è·å–ç³»ç»ŸåŸºå€
 		unsigned long long ntoskrnl = k_utils::get_module_address("ntoskrnl.exe", nullptr);
 		if (!ntoskrnl) return false;
 		DbgPrintEx(0, 0, "[%s] ntoskrnl address is 0x%llX \n", __FUNCTION__, ntoskrnl);
 
-		// ÕâÀï²»Í¬ÏµÍ³²»Í¬Î»ÖÃ
+		// è¿™é‡Œä¸åŒç³»ç»Ÿä¸åŒä½ç½®
 		unsigned long long EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".text");
 		if (!EtwpDebuggerData) EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".data");
 		if (!EtwpDebuggerData) EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".rdata");
@@ -242,31 +242,31 @@ namespace k_hook
 		DbgPrintEx(0, 0, "[%s] etwp debugger data is 0x%llX \n", __FUNCTION__, EtwpDebuggerData);
 		g_EtwpDebuggerData = (void*)EtwpDebuggerData;
 
-		// ÕâÀïÔİÊ±²»ÖªµÀÔõÃ´¶¨Î»,Æ«ÒÆ0x10ÔÚÈ«²¿ÏµÍ³¶¼Ò»Ñù
+		// è¿™é‡Œæš‚æ—¶ä¸çŸ¥é“æ€ä¹ˆå®šä½,åç§»0x10åœ¨å…¨éƒ¨ç³»ç»Ÿéƒ½ä¸€æ ·
 		g_EtwpDebuggerDataSilo = *(void***)((unsigned long long)g_EtwpDebuggerData + 0x10);
 		if (!g_EtwpDebuggerDataSilo) return false;
 		DbgPrintEx(0, 0, "[%s] etwp debugger data silo is 0x%p \n", __FUNCTION__, g_EtwpDebuggerDataSilo);
 
-		// ÕâÀïÒ²²»ÖªµÀÔõÃ´¶¨Î»,Æ«ÒÆ0x2ÔÚÈ«²¿ÏµÍ³¶¼Å¶Ò»Ñù
+		// è¿™é‡Œä¹Ÿä¸çŸ¥é“æ€ä¹ˆå®šä½,åç§»0x2åœ¨å…¨éƒ¨ç³»ç»Ÿéƒ½å“¦ä¸€æ ·
 		g_CkclWmiLoggerContext = g_EtwpDebuggerDataSilo[0x2];
 		if (!g_CkclWmiLoggerContext) return false;
 		DbgPrintEx(0, 0, "[%s] ckcl wmi logger context is 0x%p \n", __FUNCTION__, g_CkclWmiLoggerContext);
 
-		// ¸ÄÖµ»á¸Ä±äÁ½´Î? »á±ä³ÉÎŞĞ§Ö¸ÕëÒ»´Î?
-		if (g_build_number <= 9600) g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x18); // Win7°æ±¾ÒÑ¾­¸ü¾É
-		else g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x28); // Win8 -> Win10È«ÏµÍ³
+		// æ”¹å€¼ä¼šæ”¹å˜ä¸¤æ¬¡? ä¼šå˜æˆæ— æ•ˆæŒ‡é’ˆä¸€æ¬¡?
+		if (g_build_number <= 7601) g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x18); // Win7ç‰ˆæœ¬å·²ç»æ›´æ—§
+		else g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x28); // Win8 -> Win10å…¨ç³»ç»Ÿ
 		if (!MmIsAddressValid(g_GetCpuClock)) return false;
 		DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p \n", __FUNCTION__, *g_GetCpuClock);
 
-		// ÄÃµ½ssdtÖ¸Õë
+		// æ‹¿åˆ°ssdtæŒ‡é’ˆ
 		g_syscall_table = PAGE_ALIGN(k_utils::get_syscall_entry(ntoskrnl));
 		if (!g_syscall_table) return false;
 		DbgPrintEx(0, 0, "[%s] syscall table is 0x%p \n", __FUNCTION__, g_syscall_table);
 
 		if (g_build_number > 18363)
 		{
-			/* HvlGetQpcBiasº¯ÊıÄÚ²¿ĞèÒªÓÃµ½Õâ¸ö½á¹¹
-			*   ËùÒÔÎÒÃÇÊÖ¶¯¶¨Î»Õâ¸ö½á¹¹
+			/* HvlGetQpcBiaså‡½æ•°å†…éƒ¨éœ€è¦ç”¨åˆ°è¿™ä¸ªç»“æ„
+			*   æ‰€ä»¥æˆ‘ä»¬æ‰‹åŠ¨å®šä½è¿™ä¸ªç»“æ„
 			*/
 			unsigned long long address = k_utils::find_pattern_image(ntoskrnl,
 				"\x48\x8b\x05\x00\x00\x00\x00\x48\x8b\x40\x00\x48\x8b\x0d\x00\x00\x00\x00\x48\xf7\xe2",
@@ -276,8 +276,8 @@ namespace k_hook
 			if (!g_HvlpReferenceTscPage) return false;
 			DbgPrintEx(0, 0, "[%s] hvlp reference tsc page is 0x%llX \n", __FUNCTION__, g_HvlpReferenceTscPage);
 
-			/* ÕâÀïÎÒÃÇ²éÕÒµ½HvlGetQpcBiasµÄÖ¸Õë
-			*   ÏêÏ¸½éÉÜ¿ÉÒÔ¿´https://www.freebuf.com/articles/system/278857.html
+			/* è¿™é‡Œæˆ‘ä»¬æŸ¥æ‰¾åˆ°HvlGetQpcBiasçš„æŒ‡é’ˆ
+			*   è¯¦ç»†ä»‹ç»å¯ä»¥çœ‹https://www.freebuf.com/articles/system/278857.html
 			*/
 			address = k_utils::find_pattern_image(ntoskrnl,
 				"\x48\x8b\x05\x00\x00\x00\x00\x48\x85\xc0\x74\x00\x48\x83\x3d\x00\x00\x00\x00\x00\x74",
@@ -295,17 +295,17 @@ namespace k_hook
 	{
 		if (!g_fptr) return false;
 
-		// ÏÈ³¢ÊÔ¹Ò¹³
+		// å…ˆå°è¯•æŒ‚é’©
 		if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
 		{
-			// ÎŞ·¨¿ªÆôCKCL
+			// æ— æ³•å¼€å¯CKCL
 			if (!NT_SUCCESS(modify_trace_settings(start_trace)))
 			{
 				DbgPrintEx(0, 0, "[%s] start ckcl fail \n", __FUNCTION__);
 				return false;
 			}
 
-			// ÔÙ´Î³¢ÊÔ¹Ò¹³
+			// å†æ¬¡å°è¯•æŒ‚é’©
 			if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
 			{
 				DbgPrintEx(0, 0, "[%s] syscall ckcl fail \n", __FUNCTION__);
@@ -313,45 +313,45 @@ namespace k_hook
 			}
 		}
 
-		// ÎŞĞ§Ö¸Õë
+		// æ— æ•ˆæŒ‡é’ˆ
 		if (!MmIsAddressValid(g_GetCpuClock))
 		{
 			DbgPrintEx(0, 0, "[%s] get cpu clock vaild \n", __FUNCTION__);
 			return false;
 		}
 
-		/* ÕâÀïÎÒÃÇÇø·ÖÒ»ÏÂÏµÍ³°æ±¾
-		*   ´ÓWin7µ½Win10 1909,g_GetCpuClockÊÇÒ»¸öº¯Êı,ÍùºóµÄ°æ±¾ÊÇÒ»¸öÊıÖµÁË
-		*   ´óÓÚ3Å×Òì³£
-		*   µÈÓÚ3ÓÃrdtsc
-		*   µÈÓÚ2ÓÃoff_140C00A30
-		*   µÈÓÚ1ÓÃKeQueryPerformanceCounter
-		*   µÈÓÚ0ÓÃRtlGetSystemTimePrecise
-		*   ÎÒÃÇµÄ×ö·¨²Î¿¼ÍøÖ·https://www.freebuf.com/articles/system/278857.html
-		*   ÎÒÃÇÕâÀïÔÚ2ÉíÉÏ×öÎÄÕÂ
+		/* è¿™é‡Œæˆ‘ä»¬åŒºåˆ†ä¸€ä¸‹ç³»ç»Ÿç‰ˆæœ¬
+		*   ä»Win7åˆ°Win10 1909,g_GetCpuClockæ˜¯ä¸€ä¸ªå‡½æ•°,å¾€åçš„ç‰ˆæœ¬æ˜¯ä¸€ä¸ªæ•°å€¼äº†
+		*   å¤§äº3æŠ›å¼‚å¸¸
+		*   ç­‰äº3ç”¨rdtsc
+		*   ç­‰äº2ç”¨off_140C00A30
+		*   ç­‰äº1ç”¨KeQueryPerformanceCounter
+		*   ç­‰äº0ç”¨RtlGetSystemTimePrecise
+		*   æˆ‘ä»¬çš„åšæ³•å‚è€ƒç½‘å€https://www.freebuf.com/articles/system/278857.html
+		*   æˆ‘ä»¬è¿™é‡Œåœ¨2èº«ä¸Šåšæ–‡ç« 
 		*/
 		if (g_build_number <= 18363)
 		{
-			// Ö±½ÓĞŞ¸Äº¯ÊıÖ¸Õë
+			// ç›´æ¥ä¿®æ”¹å‡½æ•°æŒ‡é’ˆ
 			DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p\n", __FUNCTION__, *g_GetCpuClock);
 			*g_GetCpuClock = self_get_cpu_clock;
 			DbgPrintEx(0, 0, "[%s] update get cpu clock is 0x%p\n", __FUNCTION__, *g_GetCpuClock);
 		}
 		else
 		{
-			// ±£´æGetCpuClockÔ­Ê¼Öµ,ÍË³öÊ±ºÃ»Ö¸´
+			// ä¿å­˜GetCpuClockåŸå§‹å€¼,é€€å‡ºæ—¶å¥½æ¢å¤
 			h_original_GetCpuClock = (unsigned long long)(*g_GetCpuClock);
 
-			/* ÕâÀïÎÒÃÇÉèÖÃÎª2, ÕâÑù×Ó²ÅÄÜµ÷ÓÃoff_140C00A30º¯Êı
-			*   ÆäÊµ¸ÃÖ¸Õë¾ÍÊÇHalpTimerQueryHostPerformanceCounterº¯Êı
-			*   ¸Ãº¯ÊıÀïÃæÓÖÓĞÁ½¸öº¯ÊıÖ¸Õë,µÚÒ»¸ö¾ÍÊÇHvlGetQpcBias,¾ÍÊÇÎÒÃÇµÄÄ¿±ê
+			/* è¿™é‡Œæˆ‘ä»¬è®¾ç½®ä¸º2, è¿™æ ·å­æ‰èƒ½è°ƒç”¨off_140C00A30å‡½æ•°
+			*   å…¶å®è¯¥æŒ‡é’ˆå°±æ˜¯HalpTimerQueryHostPerformanceCounterå‡½æ•°
+			*   è¯¥å‡½æ•°é‡Œé¢åˆæœ‰ä¸¤ä¸ªå‡½æ•°æŒ‡é’ˆ,ç¬¬ä¸€ä¸ªå°±æ˜¯HvlGetQpcBias,å°±æ˜¯æˆ‘ä»¬çš„ç›®æ ‡
 			*/
 			*g_GetCpuClock = (void*)2;
 
-			// ±£´æ¾ÉHvlGetQpcBiasµØÖ·,·½±ãºóÃæÇåÀíµÄÊ±ºò¸´Ô­»·¾³
+			// ä¿å­˜æ—§HvlGetQpcBiasåœ°å€,æ–¹ä¾¿åé¢æ¸…ç†çš„æ—¶å€™å¤åŸç¯å¢ƒ
 			g_original_HvlGetQpcBias = (fptr_HvlGetQpcBias)(*((unsigned long long*)g_HvlGetQpcBias));
 
-			// ÉèÖÃ¹³×Ó
+			// è®¾ç½®é’©å­
 			*((unsigned long long*)g_HvlGetQpcBias) = (unsigned long long)self_hvl_get_qpc_bias;
 
 			DbgPrintEx(0, 0, "[%s] update hvl get qpc bias is %p \n", __FUNCTION__, self_hvl_get_qpc_bias);
@@ -364,7 +364,7 @@ namespace k_hook
 	{
 		bool result = NT_SUCCESS(modify_trace_settings(stop_trace)) && NT_SUCCESS(modify_trace_settings(start_trace));
 
-		// Win10 1909ÒÔÉÏÏµÍ³ĞèÒª»Ö¸´»·¾³
+		// Win10 1909ä»¥ä¸Šç³»ç»Ÿéœ€è¦æ¢å¤ç¯å¢ƒ
 		if (g_build_number > 18363)
 		{
 			*((unsigned long long*)g_HvlGetQpcBias) = (unsigned long long)g_original_HvlGetQpcBias;
