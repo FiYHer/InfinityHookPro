@@ -252,8 +252,11 @@ namespace k_hook
 		if (!g_CkclWmiLoggerContext) return false;
 		DbgPrintEx(0, 0, "[%s] ckcl wmi logger context is 0x%p \n", __FUNCTION__, g_CkclWmiLoggerContext);
 
-		// 改值会改变两次? 会变成无效指针一次?
-		if (g_build_number <= 7601) g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x18); // Win7版本已经更旧
+		/*  改值会改变两次 ? 会变成无效指针一次 ? 以前好像有过类似的经历
+		*   靠,Win11的偏移变成了0x18,看漏的害我调试这么久  -_-
+		*   这里总结一下,Win7和Win11都是偏移0x18,其它的是0x28
+		*/
+		if (g_build_number <= 7601 || g_build_number == 22000) g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x18); // Win7版本以及更旧, Win11也是
 		else g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x28); // Win8 -> Win10全系统
 		if (!MmIsAddressValid(g_GetCpuClock)) return false;
 		DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p \n", __FUNCTION__, *g_GetCpuClock);
@@ -347,13 +350,13 @@ namespace k_hook
 			*   该函数里面又有两个函数指针,第一个就是HvlGetQpcBias,就是我们的目标
 			*/
 			*g_GetCpuClock = (void*)2;
+			DbgPrintEx(0, 0, "[%s] update get cpu clock is %p \n", __FUNCTION__, *g_GetCpuClock);
 
 			// 保存旧HvlGetQpcBias地址,方便后面清理的时候复原环境
 			g_original_HvlGetQpcBias = (fptr_HvlGetQpcBias)(*((unsigned long long*)g_HvlGetQpcBias));
 
 			// 设置钩子
 			*((unsigned long long*)g_HvlGetQpcBias) = (unsigned long long)self_hvl_get_qpc_bias;
-
 			DbgPrintEx(0, 0, "[%s] update hvl get qpc bias is %p \n", __FUNCTION__, self_hvl_get_qpc_bias);
 		}
 
