@@ -9,6 +9,8 @@ Win11支持完毕,也只是GetCpuClock偏移变动而已
 
 代码里面有很详细的注释,不懂的地方可以结合博客
 
+再次接力,Make InfinityHook Great Again Again 💪💪💪
+
 	参考博客
 	https://bbs.pediy.com/thread-266207.htm (带逆向分析)
 	https://bbs.pediy.com/thread-266136.htm	(挂钩失效问题)
