@@ -1,10 +1,11 @@
 #include "hook.hpp"
 #include "utils.hpp"
 
-#pragma warning(disable : 4201)
+#pragma warning(disable : 4201 4819 4311 4302)
 
 /* 微软官方文档定义
-*   https://docs.microsoft.com/en-us/windows/win32/etw/wnode-header*/
+*   https://docs.microsoft.com/en-us/windows/win32/etw/wnode-header
+*/
 typedef struct _WNODE_HEADER
 {
 	ULONG BufferSize;
@@ -26,7 +27,8 @@ typedef struct _WNODE_HEADER
 } WNODE_HEADER, * PWNODE_HEADER;
 
 /* 微软文档定义
-*   https://docs.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties*/
+*   https://docs.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties
+*/
 typedef struct _EVENT_TRACE_PROPERTIES
 {
 	WNODE_HEADER Wnode;
@@ -52,14 +54,18 @@ typedef struct _EVENT_TRACE_PROPERTIES
 	ULONG LoggerNameOffset;
 } EVENT_TRACE_PROPERTIES, * PEVENT_TRACE_PROPERTIES;
 
-/* 这结构是大佬逆向出来的 */
+/* 
+*  这结构是大佬逆向出来的 
+*/
 typedef struct _CKCL_TRACE_PROPERIES : EVENT_TRACE_PROPERTIES
 {
 	ULONG64 Unknown[3];
 	UNICODE_STRING ProviderName;
 } CKCL_TRACE_PROPERTIES, * PCKCL_TRACE_PROPERTIES;
 
-// 操作类型
+/* 
+*  操作类型
+*/
 typedef enum _trace_type
 {
 	start_trace = 1,
@@ -71,24 +77,25 @@ typedef enum _trace_type
 
 namespace k_hook
 {
-	// 这个值是固定不变的
-	GUID g_ckcl_session_guid = { 0x54dea73a, 0xed1f, 0x42a4, { 0xaf, 0x71, 0x3e, 0x63, 0xd0, 0x56, 0xf1, 0x74 } };
+	GUID m_ckcl_session_guid = { 0x54dea73a, 0xed1f, 0x42a4, { 0xaf, 0x71, 0x3e, 0x63, 0xd0, 0x56, 0xf1, 0x74 } }; // 这个值是固定不变的
 
-	fptr_call_back g_fptr = nullptr;
-	unsigned long g_build_number = 0;
+	fptr_call_back m_fptr = nullptr; // 回调函数指针
+	unsigned long m_build_number = 0; // 系统版本号
+	void* m_syscall_table = nullptr; // 系统调用表指针
+	bool m_routine_status = true; // 检测线程的运行状态
 
-	void* g_EtwpDebuggerData = nullptr;
-	void* g_CkclWmiLoggerContext = nullptr;
-	void* g_syscall_table = nullptr;
+	void* m_EtwpDebuggerData = nullptr; 
+	void* m_CkclWmiLoggerContext = nullptr;
+	
+	void** m_EtwpDebuggerDataSilo = nullptr;
+	void** m_GetCpuClock = nullptr;
 
-	void** g_EtwpDebuggerDataSilo = nullptr;
-	void** g_GetCpuClock = nullptr;
+	unsigned long long m_original_GetCpuClock = 0;
+	unsigned long long m_HvlpReferenceTscPage = 0;
+	unsigned long long m_HvlGetQpcBias = 0;
 
-	unsigned long long h_original_GetCpuClock = 0;
-	unsigned long long g_HvlpReferenceTscPage = 0;
-	unsigned long long g_HvlGetQpcBias = 0;
 	typedef __int64 (*fptr_HvlGetQpcBias)();
-	fptr_HvlGetQpcBias g_original_HvlGetQpcBias = nullptr;
+	fptr_HvlGetQpcBias m_original_HvlGetQpcBias = nullptr;
 
 	// 修改跟踪设置
 	NTSTATUS modify_trace_settings(trace_type type)
@@ -123,7 +130,7 @@ namespace k_hook
 		// 结构体填充
 		property->Wnode.BufferSize = PAGE_SIZE;
 		property->Wnode.Flags = 0x00020000;
-		property->Wnode.Guid = g_ckcl_session_guid;
+		property->Wnode.Guid = m_ckcl_session_guid;
 		property->Wnode.ClientContext = 3;
 		property->BufferSize = sizeof(unsigned long);
 		property->MinimumBuffers = 2;
@@ -153,7 +160,7 @@ namespace k_hook
 
 		// 不同版本不同偏移
 		unsigned int call_index = 0;
-		if (g_build_number <= 7601) call_index = *(unsigned int*)((unsigned long long)current_thread + 0x1f8);
+		if (m_build_number <= 7601) call_index = *(unsigned int*)((unsigned long long)current_thread + 0x1f8);
 		else call_index = *(unsigned int*)((unsigned long long)current_thread + 0x80);
 
 		// 拿到当前栈底和栈顶
@@ -186,14 +193,14 @@ namespace k_hook
 			{
 				// 检查是否在ssdt表内
 				unsigned long long* ull_value = (unsigned long long*)stack_current;
-				if (!(PAGE_ALIGN(*ull_value) >= g_syscall_table && PAGE_ALIGN(*ull_value) < (void*)((unsigned long long)g_syscall_table + (PAGE_SIZE * 2)))) continue;
+				if (!(PAGE_ALIGN(*ull_value) >= m_syscall_table && PAGE_ALIGN(*ull_value) < (void*)((unsigned long long)m_syscall_table + (PAGE_SIZE * 2)))) continue;
 
 				// 现在已经确定是ssdt函数调用了
 				// 这里是找到KiSystemServiceExit
 				void** system_call_function = &stack_current[9];
 
 				// 调用回调函数
-				if (g_fptr) g_fptr(call_index, system_call_function);
+				if (m_fptr) m_fptr(call_index, system_call_function);
 
 				// 跳出循环
 				break;
@@ -214,59 +221,96 @@ namespace k_hook
 		self_get_cpu_clock();
 
 		// 这里是真正HvlGetQpcBias做的事情
-		return *((unsigned long long*)(*((unsigned long long*)g_HvlpReferenceTscPage)) + 3);
+		return *((unsigned long long*)(*((unsigned long long*)m_HvlpReferenceTscPage)) + 3);
+	}
+
+	// 检测例程
+	void detect_routine(void*)
+	{
+		while (m_routine_status)
+		{
+			// 线程常用休眠
+			k_utils::sleep(5000);
+
+			// 保存原始的GetCpuClock值,看清楚这里是静态变量
+			static void* GetCpuClockValue = 0;
+			if (MmIsAddressValid(m_GetCpuClock) && MmIsAddressValid(*m_GetCpuClock))
+			{
+				/*
+				* 在Win7系统上,GetCpuClock值会发生改变,会变成无效值,持续时间不确定但是很短
+				* 然后GetCpuClock值恢复后会变成一个新的有效值,但不是原来我们设置的那个
+				*/
+
+				// 静态变量首次赋值
+				if (GetCpuClockValue == 0) GetCpuClockValue = *m_GetCpuClock;
+
+				// 值不一样,必须重新挂钩
+				if (GetCpuClockValue != *m_GetCpuClock)
+				{
+					// 更新GetCpuClock值
+					GetCpuClockValue = *m_GetCpuClock;
+
+					// GetCpuClock值有效后,再次挂钩一般执行结果都是成功的
+					if (initialize(m_fptr))
+						if (start())
+							PsTerminateSystemThread(0);
+				}
+			}
+			else initialize(m_fptr); // GetCpuClock无效后要重新获取
+		}
 	}
 
 	bool initialize(fptr_call_back fptr)
 	{
 		// 回调函数指针检查
-		if (!fptr) return false;
 		DbgPrintEx(0, 0, "[%s] call back ptr is 0x%p \n", __FUNCTION__, fptr);
-		g_fptr = fptr;
+		if (!fptr) return false;
+		else m_fptr = fptr;
 
 		// 获取系统版本号
-		g_build_number = k_utils::get_system_build_number();
-		if (!g_build_number) return false;
-		DbgPrintEx(0, 0, "[%s] build number is %ld \n", __FUNCTION__, g_build_number);
+		m_build_number = k_utils::get_system_build_number();
+		DbgPrintEx(0, 0, "[%s] build number is %ld \n", __FUNCTION__, m_build_number);
+		if (!m_build_number) return false;
 
 		// 获取系统基址
 		unsigned long long ntoskrnl = k_utils::get_module_address("ntoskrnl.exe", nullptr);
-		if (!ntoskrnl) return false;
 		DbgPrintEx(0, 0, "[%s] ntoskrnl address is 0x%llX \n", __FUNCTION__, ntoskrnl);
+		if (!ntoskrnl) return false;
 
 		// 这里不同系统不同位置
+		// https://github.com/FiYHer/InfinityHookPro/issues/17  win10 21h2.2130 安装 KB5018410 补丁后需要使用新的特征码 
 		unsigned long long EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".text");
 		if (!EtwpDebuggerData) EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".data");
 		if (!EtwpDebuggerData) EtwpDebuggerData = k_utils::find_pattern_image(ntoskrnl, "\x00\x00\x2c\x08\x04\x38\x0c", "??xxxxx", ".rdata");
-		if (!EtwpDebuggerData) return false;
 		DbgPrintEx(0, 0, "[%s] etwp debugger data is 0x%llX \n", __FUNCTION__, EtwpDebuggerData);
-		g_EtwpDebuggerData = (void*)EtwpDebuggerData;
+		if (!EtwpDebuggerData) return false;
+		m_EtwpDebuggerData = (void*)EtwpDebuggerData;
 
 		// 这里暂时不知道怎么定位,偏移0x10在全部系统都一样
-		g_EtwpDebuggerDataSilo = *(void***)((unsigned long long)g_EtwpDebuggerData + 0x10);
-		if (!g_EtwpDebuggerDataSilo) return false;
-		DbgPrintEx(0, 0, "[%s] etwp debugger data silo is 0x%p \n", __FUNCTION__, g_EtwpDebuggerDataSilo);
+		m_EtwpDebuggerDataSilo = *(void***)((unsigned long long)m_EtwpDebuggerData + 0x10);
+		DbgPrintEx(0, 0, "[%s] etwp debugger data silo is 0x%p \n", __FUNCTION__, m_EtwpDebuggerDataSilo);
+		if (!m_EtwpDebuggerDataSilo) return false;
 
 		// 这里也不知道怎么定位,偏移0x2在全部系统都哦一样
-		g_CkclWmiLoggerContext = g_EtwpDebuggerDataSilo[0x2];
-		if (!g_CkclWmiLoggerContext) return false;
-		DbgPrintEx(0, 0, "[%s] ckcl wmi logger context is 0x%p \n", __FUNCTION__, g_CkclWmiLoggerContext);
+		m_CkclWmiLoggerContext = m_EtwpDebuggerDataSilo[0x2];
+		DbgPrintEx(0, 0, "[%s] ckcl wmi logger context is 0x%p \n", __FUNCTION__, m_CkclWmiLoggerContext);
+		if (!m_CkclWmiLoggerContext) return false;
 
-		/*  改值会改变两次 ? 会变成无效指针一次 ? 以前好像有过类似的经历
+		/*  Win7系统测试,m_GetCpuClock该值会改变几次,先阶段使用线程检测后修复
 		*   靠,Win11的偏移变成了0x18,看漏的害我调试这么久  -_-
 		*   这里总结一下,Win7和Win11都是偏移0x18,其它的是0x28
 		*/
-		if (g_build_number <= 7601 || g_build_number == 22000) g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x18); // Win7版本以及更旧, Win11也是
-		else g_GetCpuClock = (void**)((unsigned long long)g_CkclWmiLoggerContext + 0x28); // Win8 -> Win10全系统
-		if (!MmIsAddressValid(g_GetCpuClock)) return false;
-		DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p \n", __FUNCTION__, *g_GetCpuClock);
+		if (m_build_number <= 7601 || m_build_number >= 22000) m_GetCpuClock = (void**)((unsigned long long)m_CkclWmiLoggerContext + 0x18); // Win7版本以及更旧, Win11也是
+		else m_GetCpuClock = (void**)((unsigned long long)m_CkclWmiLoggerContext + 0x28); // Win8 -> Win10全系统
+		if (!MmIsAddressValid(m_GetCpuClock)) return false;
+		DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p \n", __FUNCTION__, *m_GetCpuClock);
 
 		// 拿到ssdt指针
-		g_syscall_table = PAGE_ALIGN(k_utils::get_syscall_entry(ntoskrnl));
-		if (!g_syscall_table) return false;
-		DbgPrintEx(0, 0, "[%s] syscall table is 0x%p \n", __FUNCTION__, g_syscall_table);
+		m_syscall_table = PAGE_ALIGN(k_utils::get_syscall_entry(ntoskrnl));
+		DbgPrintEx(0, 0, "[%s] syscall table is 0x%p \n", __FUNCTION__, m_syscall_table);
+		if (!m_syscall_table) return false;
 
-		if (g_build_number > 18363)
+		if (m_build_number > 18363)
 		{
 			/* HvlGetQpcBias函数内部需要用到这个结构
 			*   所以我们手动定位这个结构
@@ -275,9 +319,9 @@ namespace k_hook
 				"\x48\x8b\x05\x00\x00\x00\x00\x48\x8b\x40\x00\x48\x8b\x0d\x00\x00\x00\x00\x48\xf7\xe2",
 				"xxx????xxx?xxx????xxx");
 			if (!address) return false;
-			g_HvlpReferenceTscPage = reinterpret_cast<unsigned long long>(reinterpret_cast<char*>(address) + 7 + *reinterpret_cast<int*>(reinterpret_cast<char*>(address) + 3));
-			if (!g_HvlpReferenceTscPage) return false;
-			DbgPrintEx(0, 0, "[%s] hvlp reference tsc page is 0x%llX \n", __FUNCTION__, g_HvlpReferenceTscPage);
+			m_HvlpReferenceTscPage = reinterpret_cast<unsigned long long>(reinterpret_cast<char*>(address) + 7 + *reinterpret_cast<int*>(reinterpret_cast<char*>(address) + 3));
+			DbgPrintEx(0, 0, "[%s] hvlp reference tsc page is 0x%llX \n", __FUNCTION__, m_HvlpReferenceTscPage);
+			if (!m_HvlpReferenceTscPage) return false;
 
 			/* 这里我们查找到HvlGetQpcBias的指针
 			*   详细介绍可以看https://www.freebuf.com/articles/system/278857.html
@@ -286,9 +330,9 @@ namespace k_hook
 				"\x48\x8b\x05\x00\x00\x00\x00\x48\x85\xc0\x74\x00\x48\x83\x3d\x00\x00\x00\x00\x00\x74",
 				"xxx????xxxx?xxx?????x");
 			if (!address) return false;
-			g_HvlGetQpcBias = reinterpret_cast<unsigned long long>(reinterpret_cast<char*>(address) + 7 + *reinterpret_cast<int*>(reinterpret_cast<char*>(address) + 3));
-			if (!g_HvlGetQpcBias) return false;
-			DbgPrintEx(0, 0, "[%s] hvl get qpc bias is 0x%llX \n", __FUNCTION__, g_HvlGetQpcBias);
+			m_HvlGetQpcBias = reinterpret_cast<unsigned long long>(reinterpret_cast<char*>(address) + 7 + *reinterpret_cast<int*>(reinterpret_cast<char*>(address) + 3));
+			DbgPrintEx(0, 0, "[%s] hvl get qpc bias is 0x%llX \n", __FUNCTION__, m_HvlGetQpcBias);
+			if (!m_HvlGetQpcBias) return false;
 		}
 
 		return true;
@@ -296,7 +340,7 @@ namespace k_hook
 
 	bool start()
 	{
-		if (!g_fptr) return false;
+		if (!m_fptr) return false;
 
 		// 先尝试挂钩
 		if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
@@ -317,7 +361,7 @@ namespace k_hook
 		}
 
 		// 无效指针
-		if (!MmIsAddressValid(g_GetCpuClock))
+		if (!MmIsAddressValid(m_GetCpuClock))
 		{
 			DbgPrintEx(0, 0, "[%s] get cpu clock vaild \n", __FUNCTION__);
 			return false;
@@ -333,45 +377,57 @@ namespace k_hook
 		*   我们的做法参考网址https://www.freebuf.com/articles/system/278857.html
 		*   我们这里在2身上做文章
 		*/
-		if (g_build_number <= 18363)
+		if (m_build_number <= 18363)
 		{
 			// 直接修改函数指针
-			DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p\n", __FUNCTION__, *g_GetCpuClock);
-			*g_GetCpuClock = self_get_cpu_clock;
-			DbgPrintEx(0, 0, "[%s] update get cpu clock is 0x%p\n", __FUNCTION__, *g_GetCpuClock);
+			DbgPrintEx(0, 0, "[%s] get cpu clock is 0x%p\n", __FUNCTION__, *m_GetCpuClock);
+			*m_GetCpuClock = self_get_cpu_clock;
+			DbgPrintEx(0, 0, "[%s] update get cpu clock is 0x%p\n", __FUNCTION__, *m_GetCpuClock);
 		}
 		else
 		{
 			// 保存GetCpuClock原始值,退出时好恢复
-			h_original_GetCpuClock = (unsigned long long)(*g_GetCpuClock);
+			m_original_GetCpuClock = (unsigned long long)(*m_GetCpuClock);
 
 			/* 这里我们设置为2, 这样子才能调用off_140C00A30函数
 			*   其实该指针就是HalpTimerQueryHostPerformanceCounter函数
 			*   该函数里面又有两个函数指针,第一个就是HvlGetQpcBias,就是我们的目标
 			*/
-			*g_GetCpuClock = (void*)2;
-			DbgPrintEx(0, 0, "[%s] update get cpu clock is %p \n", __FUNCTION__, *g_GetCpuClock);
+			*m_GetCpuClock = (void*)2;
+			DbgPrintEx(0, 0, "[%s] update get cpu clock is %p \n", __FUNCTION__, *m_GetCpuClock);
 
 			// 保存旧HvlGetQpcBias地址,方便后面清理的时候复原环境
-			g_original_HvlGetQpcBias = (fptr_HvlGetQpcBias)(*((unsigned long long*)g_HvlGetQpcBias));
+			m_original_HvlGetQpcBias = (fptr_HvlGetQpcBias)(*((unsigned long long*)m_HvlGetQpcBias));
 
 			// 设置钩子
-			*((unsigned long long*)g_HvlGetQpcBias) = (unsigned long long)self_hvl_get_qpc_bias;
+			*((unsigned long long*)m_HvlGetQpcBias) = (unsigned long long)self_hvl_get_qpc_bias;
 			DbgPrintEx(0, 0, "[%s] update hvl get qpc bias is %p \n", __FUNCTION__, self_hvl_get_qpc_bias);
 		}
+
+		// 创建GetCpuClock数值检测线程
+		HANDLE h_thread = NULL;
+		CLIENT_ID client{ 0 };
+		OBJECT_ATTRIBUTES att{ 0 };
+		InitializeObjectAttributes(&att, 0, OBJ_KERNEL_HANDLE, 0, 0);
+		NTSTATUS status = PsCreateSystemThread(&h_thread, THREAD_ALL_ACCESS, &att, 0, &client, detect_routine, 0);
+		if (NT_SUCCESS(status)) ZwClose(h_thread);
+		DbgPrintEx(0, 0, "[%s] detect routine thread id is %d \n", __FUNCTION__, (int)client.UniqueThread);
 
 		return true;
 	}
 
 	bool stop()
 	{
+		// 停止检测线程
+		m_routine_status = false;
+
 		bool result = NT_SUCCESS(modify_trace_settings(stop_trace)) && NT_SUCCESS(modify_trace_settings(start_trace));
 
 		// Win10 1909以上系统需要恢复环境
-		if (g_build_number > 18363)
+		if (m_build_number > 18363)
 		{
-			*((unsigned long long*)g_HvlGetQpcBias) = (unsigned long long)g_original_HvlGetQpcBias;
-			*g_GetCpuClock = (void*)h_original_GetCpuClock;
+			*((unsigned long long*)m_HvlGetQpcBias) = (unsigned long long)m_original_HvlGetQpcBias;
+			*m_GetCpuClock = (void*)m_original_GetCpuClock;
 		}
 
 		return result;

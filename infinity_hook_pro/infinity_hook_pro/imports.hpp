@@ -25,21 +25,21 @@ extern "C"
 		SYSTEM_MODULE Modules[1];
 	} SYSTEM_MODULE_INFORMATION, * PSYSTEM_MODULE_INFORMATION;
 
-	NTSTATUS ZwQuerySystemInformation(
+	NTSTATUS NTAPI ZwQuerySystemInformation(
 		DWORD32 systemInformationClass,
 		PVOID systemInformation,
 		ULONG systemInformationLength,
 		PULONG returnLength);
 
-	NTSTATUS
-		NTAPI
-		NtTraceControl(
-			_In_ ULONG FunctionCode,
-			_In_reads_bytes_opt_(InBufferLen) PVOID InBuffer,
-			_In_ ULONG InBufferLen,
-			_Out_writes_bytes_opt_(OutBufferLen) PVOID OutBuffer,
-			_In_ ULONG OutBufferLen,
-			_Out_ PULONG ReturnLength);
+	NTSTATUS NTAPI NtTraceControl(
+		ULONG FunctionCode,
+		PVOID InBuffer,
+		ULONG InBufferLen,
+		PVOID OutBuffer,
+		ULONG OutBufferLen,
+		PULONG ReturnLength);
+
+	ULONG NTAPI PsGetProcessSessionId(PEPROCESS Process);
 
 #ifdef __cplusplus
 }

@@ -166,4 +166,15 @@ namespace k_utils
 
 		return syscall_entry;
 	}
+
+	// 休眠函数
+	void sleep(long msec)
+	{
+		LARGE_INTEGER integer{ 0 };
+
+		// 这里的负数表示的是相对时间，正数拒说表示绝对时间，我没试出效果。单位是100nm,此处乘以10000是让单位变为s,很多代码都是乘以10,即传入的单位是ms;
+		integer.QuadPart = -10000;
+		integer.QuadPart *= msec;
+		KeDelayExecutionThread(KernelMode, FALSE, &integer);
+	}
 }
