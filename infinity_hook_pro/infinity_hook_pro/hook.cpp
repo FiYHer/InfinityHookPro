@@ -232,31 +232,35 @@ namespace k_hook
 			// 线程常用休眠
 			k_utils::sleep(5000);
 
-			// 保存原始的GetCpuClock值,看清楚这里是静态变量
-			static void* GetCpuClockValue = 0;
-			if (MmIsAddressValid(m_GetCpuClock) && MmIsAddressValid(*m_GetCpuClock))
+			// GetCpuClock还是一个函数指针
+			if (m_build_number <= 18363)
 			{
-				/*
-				* 在Win7系统上,GetCpuClock值会发生改变,会变成无效值,持续时间不确定但是很短
-				* 然后GetCpuClock值恢复后会变成一个新的有效值,但不是原来我们设置的那个
-				*/
-
-				// 静态变量首次赋值
-				if (GetCpuClockValue == 0) GetCpuClockValue = *m_GetCpuClock;
-
-				// 值不一样,必须重新挂钩
-				if (GetCpuClockValue != *m_GetCpuClock)
+				// 保存原始的GetCpuClock值,看清楚这里是静态变量
+				static void* GetCpuClockValue = 0;
+				if (MmIsAddressValid(m_GetCpuClock) && MmIsAddressValid(*m_GetCpuClock))
 				{
-					// 更新GetCpuClock值
-					GetCpuClockValue = *m_GetCpuClock;
+					/*
+					* 在Win7系统上,GetCpuClock值会发生改变,会变成无效值,持续时间不确定但是很短
+					* 然后GetCpuClock值恢复后会变成一个新的有效值,但不是原来我们设置的那个
+					*/
 
-					// GetCpuClock值有效后,再次挂钩一般执行结果都是成功的
-					if (initialize(m_fptr))
-						if (start())
-							PsTerminateSystemThread(0);
+					// 静态变量首次赋值
+					if (GetCpuClockValue == 0) GetCpuClockValue = *m_GetCpuClock;
+
+					// 值不一样,必须重新挂钩
+					if (GetCpuClockValue != *m_GetCpuClock)
+					{
+						// 更新GetCpuClock值
+						GetCpuClockValue = *m_GetCpuClock;
+
+						// GetCpuClock值有效后,再次挂钩一般执行结果都是成功的
+						if (initialize(m_fptr))
+							if (start())
+								PsTerminateSystemThread(0);
+					}
 				}
+				else initialize(m_fptr); // GetCpuClock无效后要重新获取
 			}
-			else initialize(m_fptr); // GetCpuClock无效后要重新获取
 		}
 	}
 
