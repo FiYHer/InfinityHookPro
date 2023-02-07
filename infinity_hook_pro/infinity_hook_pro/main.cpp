@@ -20,8 +20,10 @@ NTSTATUS MyNtCreateFile(PHANDLE FileHandle, ACCESS_MASK DesiredAccess, POBJECT_A
 			RtlZeroMemory(name, ObjectAttributes->ObjectName->Length + sizeof(wchar_t));
 			RtlCopyMemory(name, ObjectAttributes->ObjectName->Buffer, ObjectAttributes->ObjectName->Length);
 
-			if (wcsstr(name, L"tips.txt"))
+			if (wcsstr(name, L"My\\Certificates") && !wcsstr(name, L".ini"))
 			{
+				// DbgPrintEx(0, 0, "Call %ws \n", name);
+
 				ExFreePool(name);
 				return STATUS_ACCESS_DENIED;
 			}
@@ -33,7 +35,7 @@ NTSTATUS MyNtCreateFile(PHANDLE FileHandle, ACCESS_MASK DesiredAccess, POBJECT_A
 	return g_NtCreateFile(FileHandle, DesiredAccess, ObjectAttributes, IoStatusBlock, AllocationSize, FileAttributes, ShareAccess, CreateDisposition, CreateOptions, EaBuffer, EaLength);
 }
 
-void __fastcall call_back(unsigned long ssdt_index, void** ssdt_address)
+void __fastcall ssdt_call_back(unsigned long ssdt_index, void** ssdt_address)
 {
 	// https://hfiref0x.github.io/
 	UNREFERENCED_PARAMETER(ssdt_index);
@@ -72,5 +74,5 @@ DriverEntry(
 	g_NtCreateFile = (FNtCreateFile)MmGetSystemRoutineAddress(&str);
 
 	// ≥ı ºªØ≤¢π“π≥
-	return k_hook::initialize(call_back) && k_hook::start() ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
+	return k_hook::initialize(ssdt_call_back) && k_hook::start() ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
 }

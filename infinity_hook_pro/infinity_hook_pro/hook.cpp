@@ -1,7 +1,6 @@
+#pragma warning(disable : 4201 4819 4311 4302)
 #include "hook.hpp"
 #include "utils.hpp"
-
-#pragma warning(disable : 4201 4819 4311 4302)
 
 /* 微软官方文档定义
 *   https://docs.microsoft.com/en-us/windows/win32/etw/wnode-header
@@ -77,12 +76,10 @@ typedef enum _trace_type
 
 namespace k_hook
 {
-	GUID m_ckcl_session_guid = { 0x54dea73a, 0xed1f, 0x42a4, { 0xaf, 0x71, 0x3e, 0x63, 0xd0, 0x56, 0xf1, 0x74 } }; // 这个值是固定不变的
-
-	fptr_call_back m_fptr = nullptr; // 回调函数指针
-	unsigned long m_build_number = 0; // 系统版本号
-	void* m_syscall_table = nullptr; // 系统调用表指针
-	bool m_routine_status = true; // 检测线程的运行状态
+	fssdt_call_back m_ssdt_call_back = nullptr; 
+	unsigned long m_build_number = 0;
+	void* m_syscall_table = nullptr;
+	bool m_routine_status = true;
 
 	void* m_EtwpDebuggerData = nullptr; 
 	void* m_CkclWmiLoggerContext = nullptr;
@@ -94,8 +91,8 @@ namespace k_hook
 	unsigned long long m_HvlpReferenceTscPage = 0;
 	unsigned long long m_HvlGetQpcBias = 0;
 
-	typedef __int64 (*fptr_HvlGetQpcBias)();
-	fptr_HvlGetQpcBias m_original_HvlGetQpcBias = nullptr;
+	typedef __int64 (*FHvlGetQpcBias)();
+	FHvlGetQpcBias m_original_HvlGetQpcBias = nullptr;
 
 	// 修改跟踪设置
 	NTSTATUS modify_trace_settings(trace_type type)
@@ -127,10 +124,13 @@ namespace k_hook
 		RtlCopyMemory(provider_name, L"Circular Kernel Context Logger", sizeof(L"Circular Kernel Context Logger"));
 		RtlInitUnicodeString(&property->ProviderName, (const wchar_t*)provider_name);
 
+		// 唯一标识符
+		GUID ckcl_session_guid = { 0x54dea73a, 0xed1f, 0x42a4, { 0xaf, 0x71, 0x3e, 0x63, 0xd0, 0x56, 0xf1, 0x74 } };
+
 		// 结构体填充
 		property->Wnode.BufferSize = PAGE_SIZE;
 		property->Wnode.Flags = 0x00020000;
-		property->Wnode.Guid = m_ckcl_session_guid;
+		property->Wnode.Guid = ckcl_session_guid;
 		property->Wnode.ClientContext = 3;
 		property->BufferSize = sizeof(unsigned long);
 		property->MinimumBuffers = 2;
@@ -200,7 +200,7 @@ namespace k_hook
 				void** system_call_function = &stack_current[9];
 
 				// 调用回调函数
-				if (m_fptr) m_fptr(call_index, system_call_function);
+				if (m_ssdt_call_back) m_ssdt_call_back(call_index, system_call_function);
 
 				// 跳出循环
 				break;
@@ -230,46 +230,52 @@ namespace k_hook
 		while (m_routine_status)
 		{
 			// 线程常用休眠
-			k_utils::sleep(5000);
+			k_utils::sleep(4000);
 
 			// GetCpuClock还是一个函数指针
 			if (m_build_number <= 18363)
 			{
-				// 保存原始的GetCpuClock值,看清楚这里是静态变量
-				static void* GetCpuClockValue = 0;
+				DbgPrintEx(0, 0, "[%s] fix 0x%p 0x%p \n", __FUNCTION__, m_GetCpuClock, MmIsAddressValid(m_GetCpuClock) ? *m_GetCpuClock : 0);
+
 				if (MmIsAddressValid(m_GetCpuClock) && MmIsAddressValid(*m_GetCpuClock))
 				{
-					/*
-					* 在Win7系统上,GetCpuClock值会发生改变,会变成无效值,持续时间不确定但是很短
-					* 然后GetCpuClock值恢复后会变成一个新的有效值,但不是原来我们设置的那个
-					*/
-
-					// 静态变量首次赋值
-					if (GetCpuClockValue == 0) GetCpuClockValue = *m_GetCpuClock;
-
 					// 值不一样,必须重新挂钩
-					if (GetCpuClockValue != *m_GetCpuClock)
+					if (self_get_cpu_clock != *m_GetCpuClock)
 					{
-						// 更新GetCpuClock值
-						GetCpuClockValue = *m_GetCpuClock;
-
-						// GetCpuClock值有效后,再次挂钩一般执行结果都是成功的
-						if (initialize(m_fptr))
-							if (start())
-								PsTerminateSystemThread(0);
+						if (initialize(m_ssdt_call_back)) start();
 					}
 				}
-				else initialize(m_fptr); // GetCpuClock无效后要重新获取
+				else initialize(m_ssdt_call_back); // GetCpuClock无效后要重新获取
 			}
 		}
 	}
 
-	bool initialize(fptr_call_back fptr)
+	bool initialize(fssdt_call_back ssdt_call_back)
 	{
+		if (!m_routine_status) return false;
+
 		// 回调函数指针检查
-		DbgPrintEx(0, 0, "[%s] call back ptr is 0x%p \n", __FUNCTION__, fptr);
-		if (!fptr) return false;
-		else m_fptr = fptr;
+		DbgPrintEx(0, 0, "[%s] ssdt call back ptr is 0x%p \n", __FUNCTION__, ssdt_call_back);
+		if (!MmIsAddressValid(ssdt_call_back)) return false;
+		else m_ssdt_call_back = ssdt_call_back;
+
+		// 先尝试挂钩
+		if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
+		{
+			// 无法开启CKCL
+			if (!NT_SUCCESS(modify_trace_settings(start_trace)))
+			{
+				DbgPrintEx(0, 0, "[%s] start ckcl fail \n", __FUNCTION__);
+				return false;
+			}
+
+			// 再次尝试挂钩
+			if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
+			{
+				DbgPrintEx(0, 0, "[%s] syscall ckcl fail \n", __FUNCTION__);
+				return false;
+			}
+		}
 
 		// 获取系统版本号
 		m_build_number = k_utils::get_system_build_number();
@@ -344,25 +350,7 @@ namespace k_hook
 
 	bool start()
 	{
-		if (!m_fptr) return false;
-
-		// 先尝试挂钩
-		if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
-		{
-			// 无法开启CKCL
-			if (!NT_SUCCESS(modify_trace_settings(start_trace)))
-			{
-				DbgPrintEx(0, 0, "[%s] start ckcl fail \n", __FUNCTION__);
-				return false;
-			}
-
-			// 再次尝试挂钩
-			if (!NT_SUCCESS(modify_trace_settings(syscall_trace)))
-			{
-				DbgPrintEx(0, 0, "[%s] syscall ckcl fail \n", __FUNCTION__);
-				return false;
-			}
-		}
+		if (!m_ssdt_call_back) return false;
 
 		// 无效指针
 		if (!MmIsAddressValid(m_GetCpuClock))
@@ -401,7 +389,7 @@ namespace k_hook
 			DbgPrintEx(0, 0, "[%s] update get cpu clock is %p \n", __FUNCTION__, *m_GetCpuClock);
 
 			// 保存旧HvlGetQpcBias地址,方便后面清理的时候复原环境
-			m_original_HvlGetQpcBias = (fptr_HvlGetQpcBias)(*((unsigned long long*)m_HvlGetQpcBias));
+			m_original_HvlGetQpcBias = (FHvlGetQpcBias)(*((unsigned long long*)m_HvlGetQpcBias));
 
 			// 设置钩子
 			*((unsigned long long*)m_HvlGetQpcBias) = (unsigned long long)self_hvl_get_qpc_bias;
@@ -409,13 +397,18 @@ namespace k_hook
 		}
 
 		// 创建GetCpuClock数值检测线程
-		HANDLE h_thread = NULL;
-		CLIENT_ID client{ 0 };
-		OBJECT_ATTRIBUTES att{ 0 };
-		InitializeObjectAttributes(&att, 0, OBJ_KERNEL_HANDLE, 0, 0);
-		NTSTATUS status = PsCreateSystemThread(&h_thread, THREAD_ALL_ACCESS, &att, 0, &client, detect_routine, 0);
-		if (NT_SUCCESS(status)) ZwClose(h_thread);
-		DbgPrintEx(0, 0, "[%s] detect routine thread id is %d \n", __FUNCTION__, (int)client.UniqueThread);
+		static bool is_create_thread = false;
+		if (!is_create_thread)
+		{
+			is_create_thread = true;
+			HANDLE h_thread = NULL;
+			CLIENT_ID client{ 0 };
+			OBJECT_ATTRIBUTES att{ 0 };
+			InitializeObjectAttributes(&att, 0, OBJ_KERNEL_HANDLE, 0, 0);
+			NTSTATUS status = PsCreateSystemThread(&h_thread, THREAD_ALL_ACCESS, &att, 0, &client, detect_routine, 0);
+			if (NT_SUCCESS(status)) ZwClose(h_thread);
+			DbgPrintEx(0, 0, "[%s] detect routine thread id is %d \n", __FUNCTION__, (int)client.UniqueThread);
+		}
 
 		return true;
 	}
